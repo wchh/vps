@@ -557,17 +557,17 @@ func genReqBody(r *reqInfo) ([]byte, error) {
 	return nil, fmt.Errorf("invalid api name")
 }
 
-func reqURL(r *reqInfo) (*result, error) {
+func reqURL(r *reqInfo) (*result, int, error) {
 	apiName := r.apiName
 
 	genReqURL := &GenReqURL{}
 	body, err := genReqBody(r)
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	requestURL, err := genReqURL.assembleWSAuthURL("https://api.xf-yun.com/v1/private/s782b4996", r.apiKey, r.apiSecret, "POST")
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	fmt.Println(requestURL)
 
@@ -578,7 +578,7 @@ func reqURL(r *reqInfo) (*result, error) {
 	}
 	request, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(body))
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	for key, value := range headers {
 		request.Header.Set(key, value)
@@ -586,25 +586,26 @@ func reqURL(r *reqInfo) (*result, error) {
 	client := &http.Client{}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	defer response.Body.Close()
 	responseBody, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	var tempResult map[string]interface{}
 	err = json.Unmarshal(responseBody, &tempResult)
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	fmt.Println(tempResult)
 
-	code := tempResult["header"].(map[string]interface{})["code"].(float64)
+	fcode := tempResult["header"].(map[string]interface{})["code"].(float64)
+	code := int(fcode)
 	if code != 0 {
 		err := errors.New(tempResult["header"].(map[string]interface{})["message"].(string))
-		println("code:", code, "message:", err)
-		return nil, err
+		println("code:", code, "message:", err.Error())
+		return nil, code, err
 	}
 
 	subject := ""
@@ -626,13 +627,13 @@ func reqURL(r *reqInfo) (*result, error) {
 	case "deleteGroup":
 		subject = "deleteGroupRes"
 	default:
-		return nil, fmt.Errorf("invalid api name")
+		return nil, -1, fmt.Errorf("invalid api name")
 	}
 
 	encodedText := tempResult["payload"].(map[string]interface{})[subject].(map[string]interface{})["text"].(string)
 	decodedText, err := base64.StdEncoding.DecodeString(encodedText)
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	fmt.Println(string(decodedText))
 
@@ -643,7 +644,7 @@ func reqURL(r *reqInfo) (*result, error) {
 		err := json.Unmarshal(decodedText, &response)
 		if err != nil {
 			println("searchFee json decode error:", err)
-			return nil, err
+			return nil, -1, err
 		}
 		res.featureId = response.ScoreList[0].FeatureId
 		res.score = response.ScoreList[0].Score
@@ -651,8 +652,8 @@ func reqURL(r *reqInfo) (*result, error) {
 		response := &DearchScoreFeaResponse{}
 		err := json.Unmarshal(decodedText, &response)
 		if err != nil {
-			println("searchScoreFee json decode error:", err)
-			return nil, err
+			println("searchScoreFea json decode error:", err)
+			return nil, -1, err
 		}
 		res.featureId = response.FeatureId
 		res.score = response.Score
@@ -660,7 +661,7 @@ func reqURL(r *reqInfo) (*result, error) {
 
 	println("result:", res.featureId, res.score)
 
-	return res, nil
+	return res, 0, nil
 }
 
 // {
@@ -711,14 +712,13 @@ type result struct {
 	score     float64
 }
 
-func vrg(r *reqInfo) (*result, error) {
+func vrg(r *reqInfo) (*result, int, error) {
 	r.appId = "f6e7d8fe"
 	r.apiSecret = "YmRiZjA5OGE1NmJlZGJhMWFhZDBkMWFk"
 	r.apiKey = "6c199ca711eb5007e52b5a13efe55c7b"
 	r.topK = 1
-	r.groupId = "group_001"
-	r.groupInfo = "group_001_info"
-	r.groupName = "group_001"
+	r.groupInfo = r.groupId
+	r.groupName = r.groupId
 	println(r.apiName, r.featureId, r.featureInfo)
 
 	return reqURL(r)

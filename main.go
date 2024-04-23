@@ -13,6 +13,7 @@ import (
 )
 
 var port = flag.String("p", "8888", "listen port")
+var gid = flag.String("g", "group_fzm", "group id")
 
 func main() {
 	flag.Parse()
@@ -111,47 +112,65 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// mp3 data to base64 encode
 	audio := base64.StdEncoding.EncodeToString(buf)
+
+	// first, use searchScoreFea(1:1) to find featureId
 	ri := &reqInfo{
-		apiName: "searchFea",
-		audio:   audio,
+		groupId:   *gid,
+		apiName:   "searchScoreFea",
+		featureId: featureId,
+		audio:     audio,
 	}
 
-	// first, use searFee(1:N) to find featureId
-	res, err := vrg(ri)
+	res, code, err := vrg(ri)
 	if err != nil {
-		println("Failed to search feature", err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		println("Failed to search srore feature", err.Error())
+		if code != 23007 {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// if featureId exists, checkin
-	if res.featureId == featureId { //  签到
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("checkinSeccess"))
+	if res != nil && res.featureId == featureId {
+		if res.score > 0.6 { //  签到
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("yes, you are " + featureId))
+		} else {
+			http.Error(w, "no, you are not "+featureId, http.StatusBadRequest)
+		}
 		return
 	}
 
-	// res.featureId != featureId
-	// if score < 0.5, create feature, register
-	if res.score < 0.5 { // new
-		ri.apiName = "createFeature"
-		ri.featureId = featureId
-		ri.featureInfo = featureInfo
-
-		_, err = vrg(ri)
-		if err != nil {
-			println("registerFailure: ", err.Error())
-			http.Error(w, "registerFailure: "+err.Error(), http.StatusInternalServerError)
+	// second, use searchFea(1:N) to find featureId
+	ri.apiName = "searchFea"
+	res, code, err = vrg(ri)
+	if err != nil {
+		println("Failed to search feature", err.Error())
+		if code != 23008 {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Write([]byte("registerSeccess"))
+	}
+
+	if res != nil && res.featureId == featureId {
+		println("can't go here, 1:1 not found, but 1:N found")
+		http.Error(w, "can't go here, 1:1 not found, but 1:N found", http.StatusInternalServerError)
+	}
+
+	if res != nil && res.score >= 0.6 {
+		http.Error(w, "oh, you are "+res.featureId+" not "+featureId, http.StatusBadRequest)
 		return
 	}
 
-	// res.featureId != featureId
-	// if score >= 0.5, use different featureId register again
-	if res.score >= 0.5 {
-		http.Error(w, "registerWithDifferentAddress", http.StatusBadRequest)
+	ri.apiName = "createFeature"
+	ri.featureId = featureId
+	ri.featureInfo = featureInfo
+
+	_, _, err = vrg(ri)
+	if err != nil {
+		println("create feature error: ", err.Error())
+		http.Error(w, "create feature error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.Write([]byte("create new feature for you: " + featureId))
 }
