@@ -14,6 +14,7 @@ import (
 
 var port = flag.String("p", "8888", "listen port")
 var gid = flag.String("g", "group_fzm", "group id")
+var score = flag.Float64("s", 0.36, "score threshold")
 
 func main() {
 	flag.Parse()
@@ -132,7 +133,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// if featureId exists, checkin
 	if res != nil && res.featureId == featureId {
-		if res.score > 0.6 { //  签到
+		if res.score > *score { //  签到
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("yes, you are " + featureId))
 		} else {
@@ -157,7 +158,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "can't go here, 1:1 not found, but 1:N found", http.StatusInternalServerError)
 	}
 
-	if res != nil && res.score >= 0.6 {
+	if res != nil && res.score >= *score {
 		http.Error(w, "oh, you are "+res.featureId+" not "+featureId, http.StatusBadRequest)
 		return
 	}
