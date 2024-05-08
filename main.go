@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -22,9 +23,11 @@ func main() {
 }
 
 func httpServer() {
-	http.HandleFunc("/upload", uploadHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/upload", uploadHandler)
+	mux.HandleFunc("/upload/result", resultHandler)
 	fmt.Println("Starting HTTP server...")
-	err := http.ListenAndServe(":"+*port, nil)
+	err := http.ListenAndServe(":"+*port, mux)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -33,6 +36,7 @@ func httpServer() {
 
 func hpptsServer() {
 	http.HandleFunc("/upload", uploadHandler)
+	http.HandleFunc("/result", resultHandler)
 	cfg := &tls.Config{
 		MinVersion:               tls.VersionTLS12,
 		PreferServerCipherSuites: true,
@@ -47,6 +51,11 @@ func hpptsServer() {
 	if err != nil {
 		fmt.Println(err)
 	}
+}
+
+type UploadResult struct {
+	Result int    // 0 is create ok; 1 is recongition ok; others is error
+	Error  string // error info
 }
 
 func wav2mp3(b []byte) ([]byte, error) {
@@ -71,9 +80,34 @@ func wav2mp3(b []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func uploadHandler(w http.ResponseWriter, r *http.Request) {
-	println("process remote request:", r.RemoteAddr)
+var resultMap = make(map[string]*UploadResult)
 
+func resultHandler(w http.ResponseWriter, r *http.Request) {
+	// 设置CORS头
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+	if r.Method == "OPTIONS" {
+		return
+	}
+	address := r.URL.Query().Get("address")
+	if address == "" {
+		http.Error(w, "Missing address parameter", http.StatusBadRequest)
+		println("Missing address parameter")
+		return
+	}
+	result, ok := resultMap[address]
+	if !ok {
+		result = &UploadResult{-1, "sorry, no result for the address:" + address}
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		result = &UploadResult{-1, err.Error()}
+	}
+	w.Write(data)
+}
+
+func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	// 设置CORS头
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
@@ -94,6 +128,11 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		featureId = address[:32]
 	}
 
+	result := &UploadResult{}
+	defer func() {
+		resultMap[address] = result
+	}()
+
 	println("featureId:", featureId, "featureInfo:", featureInfo, "address:", address)
 
 	// 读取请求体
@@ -102,6 +141,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
 		println("Failed to read request body")
+		result.Result = 2
+		result.Error = "failed to read request body"
 		return
 	}
 	// wav to mp3
@@ -109,6 +150,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to convert wav to mp3", http.StatusInternalServerError)
 		println("Failed to convert wav to mp3", len(buf))
+		result.Result = 2
+		result.Error = "failed to convert wav to mp3"
 		return
 	}
 	// mp3 data to base64 encode
@@ -127,6 +170,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		println("Failed to search srore feature", err.Error())
 		if code != 23007 {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			result.Result = 2
+			result.Error = err.Error()
 			return
 		}
 	}
@@ -136,8 +181,11 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		if res.score > *score { //  签到
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("yes, you are " + featureId))
+			result.Result = 1
 		} else {
 			http.Error(w, "no, you are not "+featureId, http.StatusBadRequest)
+			result.Error = "you are not " + featureId
+			result.Result = 2
 		}
 		return
 	}
@@ -149,6 +197,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		println("Failed to search feature", err.Error())
 		if code != 23008 {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			result.Result = 2
+			result.Error = err.Error()
 			return
 		}
 	}
@@ -156,10 +206,15 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if res != nil && res.featureId == featureId {
 		println("can't go here, 1:1 not found, but 1:N found")
 		http.Error(w, "can't go here, 1:1 not found, but 1:N found", http.StatusInternalServerError)
+		result.Result = 2
+		result.Error = "server error"
+		return
 	}
 
 	if res != nil && res.score >= *score {
 		http.Error(w, "oh, you are "+res.featureId+" not "+featureId, http.StatusBadRequest)
+		result.Result = 2
+		result.Error = "you are " + res.featureId + " not " + featureId
 		return
 	}
 
@@ -171,7 +226,10 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		println("create feature error: ", err.Error())
 		http.Error(w, "create feature error: "+err.Error(), http.StatusInternalServerError)
+		result.Result = 2
+		result.Error = err.Error()
 		return
 	}
 	w.Write([]byte("create new feature for you: " + featureId))
+	result.Result = 0
 }
