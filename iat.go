@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -41,7 +42,7 @@ const (
 )
 
 func iat(fp, language string) (string, error) {
-	fmt.Println(HmacWithShaTobase64("hmac-sha256", "hello\nhello", "hello"))
+	// log.Println(HmacWithShaTobase64("hmac-sha256", "hello\nhello", "hello"))
 	st := time.Now()
 	d := websocket.Dialer{
 		HandshakeTimeout: 5 * time.Second,
@@ -80,7 +81,7 @@ func iat(fp, language string) (string, error) {
 			}
 			select {
 			case <-ctx.Done():
-				fmt.Println("session end ---")
+				// log.Println("session end ---")
 				return
 			default:
 			}
@@ -102,7 +103,7 @@ func iat(fp, language string) (string, error) {
 						"encoding": "raw",
 					},
 				}
-				fmt.Println("send first")
+				// log.Println("send first")
 				conn.WriteJSON(frameData)
 				status = STATUS_CONTINUE_FRAME
 			case STATUS_CONTINUE_FRAME:
@@ -125,7 +126,7 @@ func iat(fp, language string) (string, error) {
 					},
 				}
 				conn.WriteJSON(frameData)
-				fmt.Println("send last")
+				// log.Println("send last")
 				return
 			}
 
@@ -141,24 +142,26 @@ func iat(fp, language string) (string, error) {
 		var resp = RespData{}
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
-			fmt.Println("read message error:", err)
+			log.Println("read message error:", err)
 			break
 		}
 		json.Unmarshal(msg, &resp)
-		//fmt.Println(string(msg))
-		fmt.Println(resp.Data.Result.String(), resp.Sid)
+		//log.Println(string(msg))
+		// log.Println(resp.Data.Result.String(), resp.Sid)
 		result += resp.Data.Result.String()
 		if resp.Code != 0 {
-			fmt.Println(resp.Code, resp.Message, time.Since(st))
+			log.Println(resp.Code, resp.Message, time.Since(st))
 		}
 		//decoder.Decode(&resp.Data.Result)
 		if resp.Data.Status == 2 {
 			//cf()
-			//fmt.Println("final:",decoder.String())
-			fmt.Println(resp.Code, resp.Message, time.Since(st))
+			//log.Println("final:",decoder.String())
+			// log.Println(resp.Code, resp.Message, time.Since(st))
 			break
 		}
 	}
+
+	log.Println("lat result:", result)
 
 	return result, nil
 }
@@ -179,7 +182,7 @@ type Data struct {
 func assembleAuthUrl(hosturl string, apiKey, apiSecret string) string {
 	ul, err := url.Parse(hosturl)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 	}
 	//签名时间
 	date := time.Now().UTC().Format(time.RFC1123)
@@ -188,10 +191,10 @@ func assembleAuthUrl(hosturl string, apiKey, apiSecret string) string {
 	signString := []string{"host: " + ul.Host, "date: " + date, "GET " + ul.Path + " HTTP/1.1"}
 	//拼接签名字符串
 	sgin := strings.Join(signString, "\n")
-	fmt.Println(sgin)
+	// log.Println(sgin)
 	//签名结果
 	sha := HmacWithShaTobase64("hmac-sha256", sgin, apiSecret)
-	fmt.Println(sha)
+	// log.Println(sha)
 	//构建请求参数 此时不需要urlencoding
 	authUrl := fmt.Sprintf("hmac username=\"%s\", algorithm=\"%s\", headers=\"%s\", signature=\"%s\"", apiKey,
 		"hmac-sha256", "host date request-line", sha)

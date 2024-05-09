@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -569,7 +570,7 @@ func reqURL(r *reqInfo) (*result, int, error) {
 	if err != nil {
 		return nil, -1, err
 	}
-	fmt.Println(requestURL)
+	log.Println(requestURL)
 
 	headers := map[string]string{
 		"content-type": "application/json",
@@ -598,13 +599,13 @@ func reqURL(r *reqInfo) (*result, int, error) {
 	if err != nil {
 		return nil, -1, err
 	}
-	fmt.Println(tempResult)
+	log.Println(tempResult)
 
 	fcode := tempResult["header"].(map[string]interface{})["code"].(float64)
 	code := int(fcode)
 	if code != 0 {
 		err := errors.New(tempResult["header"].(map[string]interface{})["message"].(string))
-		println("code:", code, "message:", err.Error())
+		log.Println("code:", code, "message:", err.Error())
 		return nil, code, err
 	}
 
@@ -635,7 +636,7 @@ func reqURL(r *reqInfo) (*result, int, error) {
 	if err != nil {
 		return nil, -1, err
 	}
-	fmt.Println(string(decodedText))
+	log.Println(string(decodedText))
 
 	res := &result{}
 
@@ -643,7 +644,7 @@ func reqURL(r *reqInfo) (*result, int, error) {
 		response := &SearchFeaResponse{}
 		err := json.Unmarshal(decodedText, &response)
 		if err != nil {
-			println("searchFee json decode error:", err)
+			log.Println("searchFee json decode error:", err)
 			return nil, -1, err
 		}
 		res.featureId = response.ScoreList[0].FeatureId
@@ -652,14 +653,14 @@ func reqURL(r *reqInfo) (*result, int, error) {
 		response := &DearchScoreFeaResponse{}
 		err := json.Unmarshal(decodedText, &response)
 		if err != nil {
-			println("searchScoreFea json decode error:", err)
+			log.Println("searchScoreFea json decode error:", err)
 			return nil, -1, err
 		}
 		res.featureId = response.FeatureId
 		res.score = response.Score
 	}
 
-	println("result:", res.featureId, res.score)
+	log.Println("result:", res.featureId, res.score)
 
 	return res, 0, nil
 }
@@ -702,7 +703,7 @@ type SearchFeaResponse struct {
 // 	flag.Parse()
 // 	err := reqURL(*apiName, appID, apiKey, apiSecret, *filePath)
 // 	if err != nil {
-// 		fmt.Println(err)
+// 		log.Println(err)
 // 		os.Exit(1)
 // 	}
 // }
@@ -719,7 +720,7 @@ func vrg(r *reqInfo) (*result, int, error) {
 	r.topK = 1
 	r.groupInfo = r.groupId
 	r.groupName = r.groupId
-	println(r.apiName, r.featureId, r.featureInfo)
+	log.Println(r.apiName, r.featureId, r.featureInfo)
 
 	return reqURL(r)
 }

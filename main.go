@@ -23,7 +23,7 @@ import (
 var port = flag.String("p", "8888", "listen port")
 var gid = flag.String("g", "group_fzm", "group id")
 var score = flag.Float64("s", 0.36, "score threshold")
-var path = flag.String("f", "./audio_fils", "audio file path")
+var path = flag.String("f", "./audio_files", "audio file path")
 
 func main() {
 	flag.Parse()
@@ -72,14 +72,14 @@ func wav2mp3(b []byte) ([]byte, error) {
 	rd := bytes.NewReader(b)
 	wavHeader, err := lame.ReadWavHeader(rd)
 	if err != nil {
-		println("Failed to read wav header")
+		log.Println("Failed to read wav header")
 		return nil, err
 	}
 
 	buf := new(bytes.Buffer)
 	wr, err := lame.NewWriter(buf)
 	if err != nil {
-		println("Failed to create lame writer")
+		log.Println("Failed to create lame writer")
 		return nil, err
 	}
 	wr.EncodeOptions = wavHeader.ToEncodeOptions()
@@ -103,7 +103,7 @@ func resultHandler(w http.ResponseWriter, r *http.Request) {
 	address := r.URL.Query().Get("address")
 	if address == "" {
 		http.Error(w, "Missing address parameter", http.StatusBadRequest)
-		println("Missing address parameter")
+		log.Println("Missing address parameter")
 		return
 	}
 	result, ok := resultMap[address]
@@ -115,11 +115,6 @@ func resultHandler(w http.ResponseWriter, r *http.Request) {
 		result = &UploadResult{Result: -1, Error: err.Error()}
 	}
 	w.Write(data)
-}
-
-type ItaResult struct {
-	Result string
-	Error  string
 }
 
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +129,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	address := r.URL.Query().Get("address")
 	if address == "" {
 		http.Error(w, "Missing address parameter", http.StatusBadRequest)
-		println("Missing address parameter")
+		log.Println("Missing address parameter")
 		return
 	}
 	featureInfo := address
@@ -151,14 +146,14 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		resultMap[address] = result
 	}()
 
-	println("featureId:", featureId, "id:", id, "address:", address)
+	log.Println("id:", id, "address:", address, "featureId:", featureId, "language:", language, "text:", text)
 
 	// 读取请求体
 	defer r.Body.Close()
 	b, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
-		println("Failed to read request body")
+		log.Println("Failed to read request body")
 		result.Result = 2
 		result.Error = "failed to read request body"
 		return
@@ -167,14 +162,14 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	iat_result, err := do_iat(b, address, language)
 	if err != nil {
 		http.Error(w, "iat error", http.StatusInternalServerError)
-		println("iat error:", err.Error())
+		log.Println("iat error:", err.Error())
 		result.Result = 2
 		result.Error = "iat error " + err.Error()
 		return
 	}
 	iat_result = strings.ReplaceAll(iat_result, " ", "")
 	text = strings.ReplaceAll(text, " ", "")
-	if iat_result != text {
+	if !strings.Contains(iat_result, text) {
 		http.Error(w, "iat result is "+iat_result+" not match "+text, http.StatusBadRequest)
 		result.Result = 2
 		result.Error = "iat result is " + iat_result + " not match " + text
@@ -185,7 +180,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	buf, err := wav2mp3(b)
 	if err != nil {
 		http.Error(w, "Failed to convert wav to mp3", http.StatusInternalServerError)
-		println("Failed to convert wav to mp3", len(buf))
+		log.Println("Failed to convert wav to mp3", len(buf))
 		result.Result = 2
 		result.Error = "failed to convert wav to mp3"
 		return
@@ -203,7 +198,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	res, code, err := vrg(ri)
 	if err != nil {
-		println("Failed to search srore feature", err.Error())
+		log.Println("Failed to search srore feature", err.Error())
 		if code != 23007 {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			result.Result = 2
@@ -230,7 +225,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	ri.apiName = "searchFea"
 	res, code, err = vrg(ri)
 	if err != nil {
-		println("Failed to search feature", err.Error())
+		log.Println("Failed to search feature", err.Error())
 		if code != 23008 {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			result.Result = 2
@@ -240,7 +235,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if res != nil && res.featureId == featureId {
-		println("can't go here, 1:1 not found, but 1:N found")
+		log.Println("can't go here, 1:1 not found, but 1:N found")
 		http.Error(w, "can't go here, 1:1 not found, but 1:N found", http.StatusInternalServerError)
 		result.Result = 2
 		result.Error = "server error"
@@ -260,7 +255,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	_, _, err = vrg(ri)
 	if err != nil {
-		println("create feature error: ", err.Error())
+		log.Println("create feature error: ", err.Error())
 		http.Error(w, "create feature error: "+err.Error(), http.StatusInternalServerError)
 		result.Result = 2
 		result.Error = err.Error()
@@ -273,15 +268,16 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 func do_iat(audio_buf []byte, address, language string) (string, error) {
 	// save wav to file
 	t := time.Now().Unix()
-	fp := filepath.Join(*path, address+"_"+strconv.Itoa(int(t)))
+	fp := filepath.Join(*path, address+"_"+strconv.Itoa(int(t))+".wav")
 	err := os.WriteFile(fp, audio_buf, 0666)
 	if err != nil {
 		log.Println(err)
 		return "", err
 	}
+	fp_pcm := fp[:len(fp)-4] + ".pcm"
 
 	// ffmpeg -y -i test.wav -acodec pcm_s16le -f s16le -ac 1 -ar 16000 test.pcm
-	cmd := fmt.Sprintf("ffmpeg -y -i %s -acodec pcm_s16le -f s16le -ac 1 -ar 16000 %s.pcm", fp, fp)
+	cmd := fmt.Sprintf("ffmpeg -y -i %s -acodec pcm_s16le -f s16le -ac 1 -ar 16000 %s", fp, fp_pcm)
 	_, err = exec.Command("sh", "-c", cmd).Output()
 	if err != nil {
 		return "", err
@@ -292,5 +288,5 @@ func do_iat(audio_buf []byte, address, language string) (string, error) {
 		language = "en_us"
 	}
 
-	return iat(fp, language)
+	return iat(fp_pcm, language)
 }
