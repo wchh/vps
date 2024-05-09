@@ -8,7 +8,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/youthlin/go-lame"
 )
@@ -16,6 +23,7 @@ import (
 var port = flag.String("p", "8888", "listen port")
 var gid = flag.String("g", "group_fzm", "group id")
 var score = flag.Float64("s", 0.36, "score threshold")
+var path = flag.String("f", "./audio_fils", "audio file path")
 
 func main() {
 	flag.Parse()
@@ -54,8 +62,10 @@ func hpptsServer() {
 }
 
 type UploadResult struct {
-	Result int    // 0 is create ok; 1 is recongition ok; others is error
-	Error  string // error info
+	ID        string // upload id
+	Result    int    // 0 is create ok; 1 is recongition ok; others is error
+	Error     string // error info
+	Timestamp int    // seconds from 1970-1-1
 }
 
 func wav2mp3(b []byte) ([]byte, error) {
@@ -98,13 +108,18 @@ func resultHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	result, ok := resultMap[address]
 	if !ok {
-		result = &UploadResult{-1, "sorry, no result for the address:" + address}
+		result = &UploadResult{Result: -1, Error: "sorry, no result for the address:" + address}
 	}
 	data, err := json.Marshal(result)
 	if err != nil {
-		result = &UploadResult{-1, err.Error()}
+		result = &UploadResult{Result: -1, Error: err.Error()}
 	}
 	w.Write(data)
+}
+
+type ItaResult struct {
+	Result string
+	Error  string
 }
 
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -127,13 +142,16 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if len(address) > 32 {
 		featureId = address[:32]
 	}
+	id := r.URL.Query().Get("id")
+	language := r.URL.Query().Get("language")
+	text := r.URL.Query().Get("text")
 
-	result := &UploadResult{}
+	result := &UploadResult{ID: id, Timestamp: int(time.Now().Unix())}
 	defer func() {
 		resultMap[address] = result
 	}()
 
-	println("featureId:", featureId, "featureInfo:", featureInfo, "address:", address)
+	println("featureId:", featureId, "id:", id, "address:", address)
 
 	// 读取请求体
 	defer r.Body.Close()
@@ -145,6 +163,24 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		result.Error = "failed to read request body"
 		return
 	}
+
+	iat_result, err := do_iat(b, address, language)
+	if err != nil {
+		http.Error(w, "iat error", http.StatusInternalServerError)
+		println("iat error:", err.Error())
+		result.Result = 2
+		result.Error = "iat error " + err.Error()
+		return
+	}
+	iat_result = strings.ReplaceAll(iat_result, " ", "")
+	text = strings.ReplaceAll(text, " ", "")
+	if iat_result != text {
+		http.Error(w, "iat result is "+iat_result+" not match "+text, http.StatusBadRequest)
+		result.Result = 2
+		result.Error = "iat result is " + iat_result + " not match " + text
+		return
+	}
+
 	// wav to mp3
 	buf, err := wav2mp3(b)
 	if err != nil {
@@ -232,4 +268,29 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write([]byte("create new feature for you: " + featureId))
 	result.Result = 0
+}
+
+func do_iat(audio_buf []byte, address, language string) (string, error) {
+	// save wav to file
+	t := time.Now().Unix()
+	fp := filepath.Join(*path, address+"_"+strconv.Itoa(int(t)))
+	err := os.WriteFile(fp, audio_buf, 0666)
+	if err != nil {
+		log.Println(err)
+		return "", err
+	}
+
+	// ffmpeg -y -i test.wav -acodec pcm_s16le -f s16le -ac 1 -ar 16000 test.pcm
+	cmd := fmt.Sprintf("ffmpeg -y -i %s -acodec pcm_s16le -f s16le -ac 1 -ar 16000 %s.pcm", fp, fp)
+	_, err = exec.Command("sh", "-c", cmd).Output()
+	if err != nil {
+		return "", err
+	}
+	if language == "" || language == "zh" {
+		language = "zh_cn"
+	} else {
+		language = "en_us"
+	}
+
+	return iat(fp, language)
 }
