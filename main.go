@@ -27,6 +27,7 @@ var path = flag.String("f", "./audio_files", "audio file path")
 
 func main() {
 	flag.Parse()
+	os.Mkdir(*path, 0755)
 	httpServer()
 }
 
